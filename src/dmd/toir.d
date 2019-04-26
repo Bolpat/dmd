@@ -108,18 +108,14 @@ extern (D) elem *incUsageElem(IRState *irs, const ref Loc loc)
  * Return elem that evaluates to the static frame pointer for function fd.
  * If fd is a member function, the returned expression will compute the value
  * of fd's 'this' variable.
- * 'fdp' is the parent of 'fd' if the frame pointer is being used to call 'fd'.
- * 'origSc' is the original scope we inlined from.
  * This routine is critical for implementing nested functions.
  */
-elem *getEthis(const ref Loc loc, IRState *irs, Dsymbol fd, Dsymbol fdp = null, Dsymbol origSc = null)
+elem *getEthis(const ref Loc loc, IRState *irs, Dsymbol fd)
 {
     elem *ethis;
     FuncDeclaration thisfd = irs.getFunc();
-    Dsymbol ctxt0 = fdp ? fdp : fd;                     // follow either of these two
-    Dsymbol ctxt1 = origSc ? origSc.toParent2() : null; // contexts from template arguments
-    if (!fdp) fdp = fd.toParent2();
-    Dsymbol fdparent = fdp;
+    Dsymbol fdparent = fd.toParent2();
+    Dsymbol fdp = fdparent;
 
     /* These two are compiler generated functions for the in and out contracts,
      * and are called from an overriding function, not just the one they're
@@ -255,18 +251,16 @@ elem *getEthis(const ref Loc loc, IRState *irs, Dsymbol fd, Dsymbol fdp = null, 
         Dsymbol s = thisfd;
         while (fd != s)
         {
+            FuncDeclaration fdp2 = s.toParent2().isFuncDeclaration();
+
             //printf("\ts = '%s'\n", s.toChars());
             thisfd = s.isFuncDeclaration();
-
             if (thisfd)
             {
                 /* Enclosing function is a function.
                  */
                 // Error should have been caught by front end
                 assert(thisfd.isNested() || thisfd.vthis);
-
-                // pick one context
-                ethis = fixEthis2(ethis, thisfd, followInstantiationContext(thisfd, ctxt0, ctxt1));
             }
             else
             {
@@ -287,26 +281,23 @@ elem *getEthis(const ref Loc loc, IRState *irs, Dsymbol fd, Dsymbol fdp = null, 
                 StructDeclaration sd = ad.isStructDeclaration();
                 if (fd == sd)
                     break;
-                if (!ad.isNested() || !(ad.vthis || ad.vthis2))
+                if (!ad.isNested() || !ad.vthis)
                     goto Lnoframe;
 
-                bool i = followInstantiationContext(ad, ctxt0, ctxt1);
-                const voffset = i ? ad.vthis2.offset : ad.vthis.offset;
-                ethis = el_bin(OPadd, TYnptr, ethis, el_long(TYsize_t, voffset));
+                ethis = el_bin(OPadd, TYnptr, ethis, el_long(TYsize_t, ad.vthis.offset));
                 ethis = el_una(OPind, TYnptr, ethis);
             }
-            if (fdparent == toParentP(s, ctxt0, ctxt1))
+            if (fdparent == s.toParent2())
                 break;
 
             /* Remember that frames for functions that have no
              * nested references are skipped in the linked list
              * of frames.
              */
-            FuncDeclaration fdp2 = toParentP(s, ctxt0, ctxt1).isFuncDeclaration();
             if (fdp2 && fdp2.hasNestedFrameRefs())
                 ethis = el_una(OPind, TYnptr, ethis);
 
-            s = toParentP(s, ctxt0, ctxt1);
+            s = s.toParent2();
             assert(s);
         }
     }
@@ -319,34 +310,18 @@ elem *getEthis(const ref Loc loc, IRState *irs, Dsymbol fd, Dsymbol fdp = null, 
     return ethis;
 }
 
-/************************
- * Select one context pointer from a dual-context array
- * Returns:
- *      *(ethis + offset);
- */
-elem *fixEthis2(elem *ethis, FuncDeclaration fd, bool ctxt2 = false)
-{
-    if (fd && fd.isThis2)
-    {
-        if (ctxt2)
-            ethis = el_bin(OPadd, TYnptr, ethis, el_long(TYsize_t, tysize(TYnptr)));
-        ethis = el_una(OPind, TYnptr, ethis);
-    }
-    return ethis;
-}
-
 /*************************
  * Initialize the hidden aggregate member, vthis, with
  * the context pointer.
  * Returns:
- *      *(ey + (ethis2 ? ad.vthis2 : ad.vthis).offset) = this;
+ *      *(ey + ad.vthis.offset) = this;
  */
-elem *setEthis(const ref Loc loc, IRState *irs, elem *ey, AggregateDeclaration ad, bool setthis2 = false)
+elem *setEthis(const ref Loc loc, IRState *irs, elem *ey, AggregateDeclaration ad)
 {
     elem *ethis;
     FuncDeclaration thisfd = irs.getFunc();
     int offset = 0;
-    Dsymbol adp = setthis2 ? ad.toParent2(): ad.toParentLocal();     // class/func we're nested in
+    Dsymbol adp = ad.toParent2();     // class/func we're nested in
 
     //printf("[%s] setEthis(ad = %s, adp = %s, thisfd = %s)\n", loc.toChars(), ad.toChars(), adp.toChars(), thisfd.toChars());
 
@@ -354,7 +329,7 @@ elem *setEthis(const ref Loc loc, IRState *irs, elem *ey, AggregateDeclaration a
     {
         ethis = getEthis(loc, irs, ad);
     }
-    else if (thisfd.vthis && !thisfd.isThis2 &&
+    else if (thisfd.vthis &&
           (adp == thisfd.toParent2() ||
            (adp.isClassDeclaration() &&
             adp.isClassDeclaration().isBaseOf(thisfd.toParent2().isClassDeclaration(), &offset)
@@ -375,9 +350,7 @@ elem *setEthis(const ref Loc loc, IRState *irs, elem *ey, AggregateDeclaration a
             ethis = el_una(OPaddr, TYnptr, ethis);
     }
 
-    assert(!setthis2 || ad.vthis2);
-    const voffset = setthis2 ? ad.vthis2.offset : ad.vthis.offset;
-    ey = el_bin(OPadd, TYnptr, ey, el_long(TYsize_t, voffset));
+    ey = el_bin(OPadd, TYnptr, ey, el_long(TYsize_t, ad.vthis.offset));
     ey = el_una(OPind, TYnptr, ey);
     ey = el_bin(OPeq, TYnptr, ey, ethis);
     return ey;

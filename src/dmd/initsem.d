@@ -121,7 +121,7 @@ extern(C++) Initializer initializerSemantic(Initializer init, Scope* sc, Type t,
             {
                 return new ErrorInitializer();
             }
-            const nfields = sd.nonHiddenFields();
+            size_t nfields = sd.fields.dim - sd.isNested();
             //expandTuples for non-identity arguments?
             auto elements = new Expressions(nfields);
             for (size_t j = 0; j < elements.dim; j++)

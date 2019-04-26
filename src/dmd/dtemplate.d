@@ -777,7 +777,6 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
                 fd.storage_class |= STC.static_;
             auto hiddenParams = fd.declareThis(scx, fd.isThis());
             fd.vthis = hiddenParams.vthis;
-            fd.isThis2 = hiddenParams.isThis2;
             fd.selectorParameter = hiddenParams.selectorParameter;
         }
 
@@ -7227,11 +7226,13 @@ extern (C++) class TemplateInstance : ScopeDsymbol
         int nested = 0;
         //printf("TemplateInstance.hasNestedArgs('%s')\n", tempdecl.ident.toChars());
 
-        // arguments from parent instances are also accessible
-        if (!enclosing)
+        version (none)
         {
-            if (TemplateInstance ti = tempdecl.toParent().isTemplateInstance())
-                enclosing = ti.enclosing;
+            if (!enclosing)
+            {
+                if (TemplateInstance ti = tempdecl.isInstantiated())
+                    enclosing = ti.enclosing;
+            }
         }
 
         /* A nested instance happens when an argument references a local
@@ -7285,35 +7286,44 @@ extern (C++) class TemplateInstance : ScopeDsymbol
                 Declaration d = sa.isDeclaration();
                 if ((td && td.literal) || (ti && ti.enclosing) || (d && !d.isDataseg() && !(d.storage_class & STC.manifest) && (!d.isFuncDeclaration() || d.isFuncDeclaration().isNested()) && !isTemplateMixin()))
                 {
-                    Dsymbol dparent = sa.toParent2();
-                    if (!dparent)
-                        goto L1;
-                    else if (!enclosing)
-                        enclosing = dparent;
-                    else if (enclosing != dparent)
+                    // if module level template
+                    if (isstatic)
                     {
-                        /* Select the more deeply nested of the two.
-                         * Error if one is not nested inside the other.
-                         */
-                        for (Dsymbol p = enclosing; p; p = p.parent)
+                        Dsymbol dparent = sa.toParent2();
+                        if (!dparent)
+                            goto L1;
+                        else if (!enclosing)
+                            enclosing = dparent;
+                        else if (enclosing != dparent)
                         {
-                            if (p == dparent)
-                                goto L1; // enclosing is most nested
-                        }
-                        for (Dsymbol p = dparent; p; p = p.parent)
-                        {
-                            if (p == enclosing)
+                            /* Select the more deeply nested of the two.
+                             * Error if one is not nested inside the other.
+                             */
+                            for (Dsymbol p = enclosing; p; p = p.parent)
                             {
-                                enclosing = dparent;
-                                goto L1; // dparent is most nested
+                                if (p == dparent)
+                                    goto L1; // enclosing is most nested
                             }
+                            for (Dsymbol p = dparent; p; p = p.parent)
+                            {
+                                if (p == enclosing)
+                                {
+                                    enclosing = dparent;
+                                    goto L1; // dparent is most nested
+                                }
+                            }
+                            error("`%s` is nested in both `%s` and `%s`", toChars(), enclosing.toChars(), dparent.toChars());
+                            errors = true;
                         }
-                        error("`%s` is nested in both `%s` and `%s`", toChars(), enclosing.toChars(), dparent.toChars());
+                    L1:
+                        //printf("\tnested inside %s\n", enclosing.toChars());
+                        nested |= 1;
+                    }
+                    else
+                    {
+                        error("cannot use local `%s` as parameter to non-global template `%s`", sa.toChars(), tempdecl.toChars());
                         errors = true;
                     }
-                L1:
-                    //printf("\tnested inside %s\n", enclosing.toChars());
-                    nested |= 1;
                 }
             }
             else if (va)

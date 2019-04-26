@@ -1146,7 +1146,6 @@ void FuncDeclaration_toObjFile(FuncDeclaration fd, bool multiobj)
             // Adjust the 'this' pointer instead of using a thunk
             assert(irs.sthis);
             elem *ethis = el_var(irs.sthis);
-            ethis = fixEthis2(ethis, fd);
             elem *e = el_bin(OPminass, TYnptr, ethis, el_long(TYsize_t, fd.interfaceVirtual.offset));
             block_appendexp(irs.blx.curblock, e);
         }
@@ -1175,10 +1174,8 @@ void FuncDeclaration_toObjFile(FuncDeclaration fd, bool multiobj)
             {
                 if (b.BC == BCret)
                 {
-                    elem *ethis = el_var(sthis);
-                    ethis = fixEthis2(ethis, fd);
                     b.BC = BCretexp;
-                    b.Belem = el_combine(b.Belem, ethis);
+                    b.Belem = el_combine(b.Belem, el_var(sthis));
                 }
             }
         }

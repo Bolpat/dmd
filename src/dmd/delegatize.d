@@ -237,7 +237,7 @@ bool ensureStaticLinkTo(Dsymbol s, Dsymbol p)
             if (ad.storage_class & STC.static_)
                 break;
         }
-        s = toParentP(s, p);
+        s = s.toParent2();
     }
     return false;
 }
