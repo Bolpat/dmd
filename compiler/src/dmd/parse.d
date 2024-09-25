@@ -5078,7 +5078,9 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
     private AST.Dsymbol parseFunctionLiteral()
     {
         const loc = token.loc;
+        bool isExplicitTemplate = false;
         AST.TemplateParameters* tpl = null;
+        AST.Expression constraint = null;
         AST.ParameterList parameterList;
         AST.Type tret = null;
         StorageClass stc = 0;
@@ -5090,6 +5092,14 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
         case TOK.delegate_:
             save = token.value;
             nextToken();
+
+            if (token.value == TOK.template_)
+            {
+                nextToken();
+                isExplicitTemplate = true;
+                tpl = parseTemplateParameterList();
+            }
+
             if (token.value == TOK.auto_)
             {
                 nextToken();
@@ -5158,7 +5168,7 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
             {
                 // (parameters) => expression
                 // (parameters) { statements... }
-                parameterList = parseParameterList(&tpl);
+                parameterList = parseParameterList(isExplicitTemplate ? null : &tpl);
                 stc = parsePostfix(stc, null);
                 if (StorageClass modStc = stc & STC.TYPECTOR)
                 {
@@ -5196,6 +5206,11 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
             assert(0);
         }
 
+        if (isExplicitTemplate)
+        {
+            constraint = parseConstraint();
+        }
+
         auto tf = new AST.TypeFunction(parameterList, tret, linkage, stc);
         tf = cast(AST.TypeFunction)tf.addSTC(stc);
         auto fd = new AST.FuncLiteralDeclaration(loc, Loc.initial, tf, save, null, null, stc & STC.auto_);
@@ -5215,7 +5230,7 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
         }
         else
         {
-            parseContracts(fd);
+            parseContracts(fd, isExplicitTemplate);
         }
 
         if (tpl)
@@ -5223,7 +5238,7 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
             // Wrap a template around function fd
             auto decldefs = new AST.Dsymbols();
             decldefs.push(fd);
-            return new AST.TemplateDeclaration(fd.loc, fd.ident, tpl, null, decldefs, false, true);
+            return new AST.TemplateDeclaration(fd.loc, fd.ident, tpl, constraint, decldefs, false, true);
         }
         return fd;
     }
